@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sea Level Rise Viewer</title>
+  <link rel="stylesheet" href="https://openlayers.org/en/v5.3.0/css/ol.css" type="text/css">
+  <style>
+    body {
+      margin: 0; /* Remove default body margin */
+      overflow: hidden; /* Prevent scrollbars */
+    }
+
+    #header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      padding: 10px;
+      background-color: rgba(115, 152, 176, 0.9); /* Blue transparent color */
+      color: white;
+      text-align: left;
+      font-family: 'Roboto', sans-serif;
+      font-size: 20px;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(244, 244, 244, 0.1);
+      z-index: 1002; /* Ensure it is above the map and slider container */
+    }
+
+    #map {
+      position: absolute;
+      top: 40px; /* Adjusted to leave space for the header */
+      left: 0;
+      width: 100%;
+      height: calc(100% - 40px); /* Adjusted to leave space for the header */
+      background: #85ccf9;
+    }
+
+    #slider-container {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 1001; /* Ensure it is above the map */
+      background-color: rgba(115, 152, 176, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+	  font-family: 'Roboto', sans-serif;
+	  color: white;
+    }
+
+    #level {
+      display: inline-block;
+      width: 150px;
+      vertical-align: text-bottom;
+	  
+    }
+
+    .basemap-switcher {
+      position: absolute;
+      top: 60px;
+      right: 10px;
+      z-index: 1000;
+      background-color: rgba(115, 152, 176, 0.9);
+      padding: 5px;
+      border-radius: 5px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+	  font-family: 'Roboto', sans-serif;
+	  color: white;
+    }
+
+    #basemap-switcher label {
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">Sea Level Rise Viewer</div>
+  <div id="map" class="map"></div>
+  <div id="slider-container">
+    <label>
+      Sea level
+      <input id="level" type="range" min="0" max="100" value="0"/>
+      +<span id="output"></span> m
+    </label>
+  </div>
+  <div class="basemap-switcher">
+    <label><input type="radio" name="basemap" value="osm" checked> OSM</label>
+    <label><input type="radio" name="basemap" value="satellite"> Satellite</label>
+  </div>
+
+ 
+
+  <script src="https://openlayers.org/en/v5.3.0/build/ol.js"></script>
+  <script>
+    // Map initialization
+    const map = new ol.Map({
+      target: 'map',
+      layers: [
+        new ol.layer.Tile({
+          source: new ol.source.OSM(),
+        }),
+      ],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([-122.3267, 37.8377]),
+        zoom: 11,
+      }),
+    });
+
+    // Basemap switcher
+    const basemapSwitcher = document.querySelector('.basemap-switcher');
+    basemapSwitcher.addEventListener('change', function (event) {
+      const basemap = event.target.value;
+      let basemapLayer;
+      if (basemap === 'satellite') {
+        basemapLayer = new ol.layer.Tile({
+          source: new ol.source.XYZ({
+            url: 'https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=72sRbTdDgxK5zPCpVCbL',
+            attributions: 'Satellite Imagery & Elevation Data &copy; <a href="https://www.maptiler.com/" target="_blank">MapTiler</a>',
+          }),
+        });
+      } else {
+        basemapLayer = new ol.layer.Tile({
+          source: new ol.source.OSM(),
+        });
+      }
+
+      map.getLayers().setAt(0, basemapLayer);
+    });
+
+    // Elevation layer
+    const elevation = new ol.source.XYZ({
+      url: 'https://api.maptiler.com/tiles/terrain-rgb/{z}/{x}/{y}.png?key=72sRbTdDgxK5zPCpVCbL',
+      tileSize: 512,
+      maxZoom: 12,
+      crossOrigin: '',
+    });
+
+    // Image overlay with opacity
+    const raster = new ol.layer.Image({
+  source: new ol.source.Raster({
+    sources: [elevation],
+    operation: function (pixels, data) {
+      const pixel = pixels[0];
+      if (pixel[3]) {
+        const height = -10000 + (pixel[0] * 256 * 256 + pixel[1] * 256 + pixel[2]) * 0.1;
+        if (height <= 0) {
+          pixel[3] = 0; // Set alpha to 0 for pixels below or at 0 meters elevation
+        } else if (height <= data.level) {
+          pixel[0] = 134;
+          pixel[1] = 203;
+          pixel[2] = 249;
+          pixel[3] = 255;
+        } else {
+          pixel[3] = 0;
+        }
+      } else {
+        // Handle transparent pixels (no data) to avoid showing them when level is 0
+        pixel[3] = 0;
+      }
+      return pixel;
+    },
+  }),
+  opacity: 0.6,
+});
+
+    map.addLayer(raster);
+
+    // Update overlay on range input change
+    const control = document.getElementById('level');
+    const output = document.getElementById('output');
+    control.addEventListener('input', function () {
+      output.innerText = control.value;
+      raster.getSource().changed();
+    });
+    output.innerText = control.value;
+
+    raster.getSource().on('beforeoperations', function (event) {
+      event.data.level = control.value;
+    });
+
+    // Go to location on click
+    const locations = document.getElementsByClassName('location');
+    for (let i = 0, ii = locations.length; i < ii; ++i) {
+      locations[i].addEventListener('click', relocate);
+    }
+
+    function relocate(event) {
+      const data = event.target.dataset;
+      const view = map.getView();
+      view.setCenter(ol.proj.fromLonLat(data.center.split(',').map(Number)));
+      view.setZoom(Number(data.zoom));
+    }
+  </script>
+</body>
+</html>
